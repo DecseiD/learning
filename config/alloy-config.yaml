@@ -1,0 +1,170 @@
+// this is for metrics
+
+local.file_match "vm_files" {
+  path_targets = [{
+    __address__ = "localhost",
+    __path__ = "/cases/REPLACE YOUR PATH HERE TO METRICS",
+  }]
+}
+
+loki.source.file "vm_files" {
+  targets    = local.file_match.vm_files.targets
+  forward_to = [loki.process.vm_files.receiver]
+}
+
+loki.process "vm_files" {
+
+  stage.static_labels {
+    values = {
+      job = "vm-file",
+    }
+  }
+
+  forward_to = [loki.write.default.receiver]
+}
+
+// This is for all logs
+
+discovery.relabel "all_logs" {
+  targets = [{
+    __address__ = "localhost",
+    __path__    = "/cases/REPLACE YOUR PATH HERE TO LOGS",
+  }]
+}
+
+local.file_match "all_logs" {
+  path_targets = discovery.relabel.all_logs.output
+}
+
+loki.source.file "all_logs" {
+  targets = local.file_match.all_logs.targets
+  forward_to = [loki.process.all_logs.receiver]
+  legacy_positions_file = "/tmp/pos_all.yaml"
+}
+
+loki.process "all_logs" {
+  // Format: 2025-03-25T17:53:04.063Z
+  stage.regex {
+    expression = "^(?P<ts>\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d+Z) (?P<msg>.*)"
+  }
+  stage.timestamp {
+    source = "ts"
+    format = "RFC3339Nano"
+    action_on_failure = "fudge"
+  }
+
+  // Format: "timestamp":"2025-05-13T06:28:11.224+00:00"
+  stage.regex {
+    expression = ".*(?P<ts>\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d+(?:[+-]\\d{2}:\\d{2})) (?P<msg>.*)"
+  }
+  stage.timestamp {
+    source = "ts"
+    format = "2006-01-02T15:04:05.000-07:00"
+    action_on_failure = "fudge"
+  }
+
+  // Format: time=2025-03-25T18:03:53.382Z
+  stage.regex {
+    expression = ".*(?P<ts>\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d+Z) (?P<msg>.*)"
+  }
+  stage.timestamp {
+    source = "ts"
+    format = "RFC3339Nano"
+    action_on_failure = "fudge"
+  }
+
+  // Format: 2025-05-15T00:00:01.851509+01:00
+  stage.regex {
+    expression = "^(?P<ts>\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d+[+-]\\d{2}:\\d{2}) (?P<msg>.*)"
+  }
+  stage.timestamp {
+    source = "ts"
+    format = "2006-01-02T15:04:05.000000-07:00"
+    action_on_failure = "fudge"
+  }
+
+  // Format: Tue Mar 25 17:47:58.593620 2025
+  stage.regex {
+    expression = "^(?P<ts>[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d{6} \\d{4}) (?P<msg>.*)"
+  }
+  stage.timestamp {
+    source = "ts"
+    format = "Mon Jan 02 15:04:05.000000 2006"
+    action_on_failure = "fudge"
+  }
+
+  // Format: 25/Mar/2025:17:50:27 +0000
+  stage.regex {
+    expression = "^(?P<ts>\\d{2}/[A-Za-z]{3}/\\d{4}:\\d{2}:\\d{2}:\\d{2} [+\\-]\\d{4}) (?P<msg>.*)"
+  }
+  stage.timestamp {
+    source = "ts"
+    format = "02/Jan/2006:15:04:05 -0700"
+    action_on_failure = "fudge"
+  }
+
+  // Format: 2025/05/13 13:29:26
+  stage.regex {
+    expression = "^(?P<ts>\\d{4}/\\d{2}/\\d{2} \\d{2}:\\d{2}:\\d{2}) (?P<msg>.*)"
+  }
+  stage.timestamp {
+    source = "ts"
+    format = "2006/01/02 15:04:05"
+    action_on_failure = "fudge"
+  }
+
+  // Format: 2025-03-25 17:31:09,991
+  stage.regex {
+    expression = "^(?P<ts>\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2},\\d+) (?P<msg>.*)"
+  }
+  stage.timestamp {
+    source = "ts"
+    format = "2006-01-02 15:04:05,000"
+    action_on_failure = "fudge"
+  }
+
+  // Format: 2025-05-15 16:26:11 +0000
+  stage.regex {
+    expression = "^(?P<ts>\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2} [+\\-]\\d{4}) (?P<msg>.*)"
+  }
+  stage.timestamp {
+    source = "ts"
+    format = "2006-01-02 15:04:05 -0700"
+    action_on_failure = "fudge"
+  }
+
+  // Format: I0325 18:01:20.991829 or W0325 17:48:04.853104
+  stage.regex {
+    expression = "^[IW]\\d{4} (?P<ts>\\d{2}:\\d{2}:\\d{2}\\.\\d+) (?P<msg>.*)"
+  }
+  stage.timestamp {
+    source = "ts"
+    format = "15:04:05.000000"
+    action_on_failure = "fudge"
+  }
+
+  // Static label
+  stage.static_labels {
+    values = {
+      job = "all-logs",
+    }
+  }
+
+  // Output reformatted log line with parsed timestamp
+  stage.template {
+    source = "entry"
+    template = "{{ .timestamp }} {{ .msg }}"
+  }
+
+  stage.output {
+    source = "msg"
+  }
+
+  forward_to = [loki.write.default.receiver]
+}
+
+loki.write "default" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
